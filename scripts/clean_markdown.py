@@ -1,114 +1,178 @@
-# clean_markdown.py
+# clean_markdown.py — Clean and extract documentation for ChatGPT
 #
-# Этот скрипт:
-# 1. Загружает внешний репозиторий (shallow clone)
-# 2. Проверяет commit HEAD
-# 3. Если commit не изменился — завершает работу
-# 4. Если commit изменился:
-#     - очищает указанные файлы от markdown-шумов (html, изображения, ссылки)
-#     - сохраняет в <repo_name>-clean-docs-for-gpt/
-#     - коммитит и пушит результат
-#
-# Поддерживает два режима запуска:
-# - auto (по умолчанию): сразу выполняет все действия
-# - manual-review: выводит commit и завершает, без изменений
+# This standalone script clones a documentation repo, selects and cleans Markdown/YAML files,
+# saves the cleaned versions preserving structure, and logs the changes.
+# It supports 'auto' and 'manual-review' execution modes and requires no external modules.
 
 import os
-import yaml
-import re
+import sys
 import shutil
 import fnmatch
 import subprocess
+import yaml
 from pathlib import Path
-import sys
+from datetime import datetime
 
 CONFIG_PATH = Path(".clean-docs-for-gpt_config.yml")
-STATE_FILE = Path(".clean-docs-for-gpt/last_source_commit.txt")
+STATE_FILE = Path(".clean-docs-for-gpt/last_commit.txt")
+LOG_FILE = Path(".clean-docs-for-gpt/cleaning_log.txt")
 
-def load_config():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
-def get_latest_commit(repo_url):
-    # Получить текущий хэш HEAD оригинального репозитория
-    output = subprocess.check_output(["git", "ls-remote", repo_url, "HEAD"], text=True)
-    return output.split()[0]
+def clean_text(text):
+    """Perform basic cleanup: strip empty lines and excessive whitespace."""
+    return '\n'.join(line.rstrip() for line in text.splitlines() if line.strip())
 
-def get_last_processed_commit():
-    # Считать предыдущий обработанный commit из файла состояния
-    if STATE_FILE.exists():
-        return STATE_FILE.read_text().strip()
-    return None
-
-def save_commit(commit_hash):
-    # Сохранить текущий хэш в файл состояния
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(commit_hash)
 
 def match_patterns(path, patterns):
-    # Проверка путей по шаблонам include/exclude
+    """Match file path against any pattern using glob syntax."""
+    if not patterns:
+        return False
     return any(fnmatch.fnmatch(path.as_posix(), pattern) for pattern in patterns)
 
-def clean_content(content, ext):
-    # Очистка markdown-файлов от лишнего
-    if ext in [".md", ".markdown"]:
-        content = re.sub(r"!\[.*?\]\(.*?\)", "", content)
-        content = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", content)
-        content = re.sub(r"<[^>]+>", "", content)
-    return content
+
+def clone_repo(repo_url):
+    """Clone repo to tmp_repo folder and return its path and commit hash."""
+    tmp_path = Path("tmp_repo")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+    subprocess.run(["git", "clone", "--depth=1", repo_url, str(tmp_path)], check=True)
+    commit = subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
+    return tmp_path, commit
+
+
+def load_config():
+    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def already_processed(commit_hash):
+    """Check if this commit was already cleaned."""
+    if STATE_FILE.exists():
+        return STATE_FILE.read_text(encoding="utf-8").strip() == commit_hash
+    return False
+
+
+def save_commit_hash(commit_hash):
+    STATE_FILE.parent.mkdir(exist_ok=True)
+    STATE_FILE.write_text(commit_hash, encoding="utf-8")
+
+
+def write_log(report, summary, commit_hash, repo_url):
+    """Generate human-readable report of cleaned files."""
+    LOG_FILE.parent.mkdir(exist_ok=True)
+    with LOG_FILE.open("w", encoding="utf-8") as log:
+        log.write(f"# clean-docs-for-gpt – Cleaning Report\n")
+        log.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        log.write(f"Source repo: {repo_url}\n")
+        log.write(f"Source commit: {commit_hash}\n\n")
+        log.write(f"--- Files Processed: {len(report)} ---\n\n")
+        for item in report:
+            log.write(f"✔ {item['path']}\n")
+            log.write(f"   Original lines   : {item['original_lines']}\n")
+            log.write(f"   Cleaned lines    : {item['cleaned_lines']}\n")
+            log.write(f"   Removed lines    : {item['removed_lines']}\n")
+            log.write(f"   Original chars   : {item['original_chars']}\n")
+            log.write(f"   Cleaned chars    : {item['cleaned_chars']}\n")
+            log.write(f"   Removed chars    : {item['removed_chars']}\n")
+            log.write(f"   Notes            : {item['notes']}\n\n")
+        log.write(f"--- Summary ---\n")
+        log.write(f"Total files         : {summary['files']}\n")
+        log.write(f"Total lines before  : {summary['lines_before']}\n")
+        log.write(f"Total lines after   : {summary['lines_after']}\n")
+        log.write(f"Total lines removed : {summary['lines_removed']}\n")
+        log.write(f"Total chars before  : {summary['chars_before']}\n")
+        log.write(f"Total chars after   : {summary['chars_after']}\n")
+        log.write(f"Total chars removed : {summary['chars_removed']}\n")
+
+
+
+def clean_docs(repo_url, commit_hash, repo_path, config):
+    print(f"[INFO] Cleaning started for: {repo_url}")
+    print(f"[INFO] Using include filters: {config.get('include', [])}")
+    print(f"[INFO] Using exclude filters: {config.get('exclude', [])}")
+    print(f"[INFO] Target extensions: {config.get('extensions', [])}")
+    print(f"[INFO] Scanning files...")
+
+    out_dir = f"{Path(repo_url).name}-clean-docs-for-gpt"
+    Path(out_dir).mkdir(exist_ok=True)
+
+    report = []
+    summary = {
+        "files": 0,
+        "lines_before": 0,
+        "lines_after": 0,
+        "lines_removed": 0,
+        "chars_before": 0,
+        "chars_after": 0,
+        "chars_removed": 0
+    }
+
+    for file in repo_path.rglob("*"):
+        if not file.is_file():
+            continue
+
+        rel_path = file.relative_to(repo_path)
+        if not match_patterns(rel_path, config["include"]):
+            continue
+        if match_patterns(rel_path, config.get("exclude", [])):
+            continue
+        if file.suffix not in config.get("extensions", []):
+            continue
+
+        original = file.read_text(encoding="utf-8")
+        cleaned = clean_text(original)
+
+        original_lines = original.count("\n")
+        cleaned_lines = cleaned.count("\n")
+        original_chars = len(original)
+        cleaned_chars = len(cleaned)
+
+        report.append({
+            "path": str(rel_path),
+            "original_lines": original_lines,
+            "cleaned_lines": cleaned_lines,
+            "removed_lines": original_lines - cleaned_lines,
+            "original_chars": original_chars,
+            "cleaned_chars": cleaned_chars,
+            "removed_chars": original_chars - cleaned_chars,
+            "notes": "basic cleanup"
+        })
+
+        summary["files"] += 1
+        summary["lines_before"] += original_lines
+        summary["lines_after"] += cleaned_lines
+        summary["lines_removed"] += original_lines - cleaned_lines
+        summary["chars_before"] += original_chars
+        summary["chars_after"] += cleaned_chars
+        summary["chars_removed"] += original_chars - cleaned_chars
+
+        out_path = Path(out_dir) / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(cleaned, encoding="utf-8")
+
+    write_log(report, summary, commit_hash, repo_url)
+
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "auto"
-    cfg = load_config()
-    repo_url = cfg["repo_url"]
-    include = cfg.get("include", [])
-    exclude = cfg.get("exclude", [])
-    extensions = cfg.get("extensions", [])
+    config = load_config()
+    repo_url = config["repo_url"]
 
-    latest_commit = get_latest_commit(repo_url)
-    last_commit = get_last_processed_commit()
-
-    if last_commit == latest_commit:
-        print("✅ Documentation is up to date. No changes detected.")
-        return
+    repo_path, commit_hash = clone_repo(repo_url)
 
     if mode == "manual-review":
-        print("🔍 New commit detected:", latest_commit)
-        print("Previous commit was:", last_commit)
-        print("Please review manually before continuing.")
+        print(f"[INFO] Last commit in {repo_url}: {commit_hash}")
         return
 
-    repo_name = repo_url.rstrip("/").split("/")[-1]
-    output_root = Path(f"{repo_name}-clean-docs-for-gpt")
-    if output_root.exists():
-        shutil.rmtree(output_root)
+    if mode == "auto" and already_processed(commit_hash):
+        print("[INFO] No changes detected, skipping.")
+        return
 
-    os.system(f"git clone --depth=1 {repo_url} tmp_repo")
-    base_path = Path("tmp_repo")
+    clean_docs(repo_url, commit_hash, repo_path, config)
+    save_commit_hash(commit_hash)
 
-    for file in base_path.rglob("*"):
-        if not file.is_file() or file.suffix not in extensions:
-            continue
-        rel_path = file.relative_to(base_path)
-        if not match_patterns(rel_path, include) or match_patterns(rel_path, exclude):
-            continue
-        out_path = output_root / rel_path
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file, "r", encoding="utf-8", errors="ignore") as f_in:
-            raw = f_in.read()
-            cleaned = clean_content(raw, file.suffix)
-        with open(out_path, "w", encoding="utf-8") as f_out:
-            f_out.write(cleaned)
+    print("[INFO] Cleaning complete.")
 
-    shutil.rmtree("tmp_repo")
-
-    save_commit(latest_commit)
-
-    os.system("git config user.name 'github-actions[bot]'")
-    os.system("git config user.email 'github-actions[bot]@users.noreply.github.com'")
-    os.system("git add .")
-    os.system(f"git commit -m 'docs: update cleaned docs from {latest_commit}' || echo 'Nothing to commit'")
-    os.system("git push")
 
 if __name__ == "__main__":
     main()
