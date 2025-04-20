@@ -142,6 +142,7 @@ def main():
     clean_docs(repo_url, commit_hash, repo_path, config)
     save_commit_hash(commit_hash)
     print("[INFO] Cleaning complete.")
+    shutil.rmtree(Path(".clean-docs-for-gpt/tmp_repo"), ignore_errors=True)
 
 if __name__ == "__main__":
     main()
