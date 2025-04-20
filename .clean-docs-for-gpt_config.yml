@@ -11,10 +11,10 @@
 repo_url: https://github.com/home-assistant/home-assistant.io
 
 include:
-  - source/docs/*  # Включить все файлы документации
+  - source/_docs/*  # Включить все файлы документации
 exclude:
-  - source/blog/*  # Исключить блог
-  - source/_*      # Исключить скрытые или вспомогательные директории
+#  - source/blog/*  # Исключить блог
+#  - source/_*      # Исключить скрытые или вспомогательные директории
 
 extensions:
   - .md
