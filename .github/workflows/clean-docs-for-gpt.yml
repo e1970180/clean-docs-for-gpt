@@ -1,0 +1,38 @@
+# GitHub Actions Workflow: clean-docs-for-gpt
+#
+# Назначение:
+# - Загружает внешний репозиторий с документацией
+# - Проверяет, изменился ли последний commit
+# - Если изменился:
+#     - Очищает нужные файлы
+#     - Сохраняет результат в папку <repo_name>-clean-docs-for-gpt/
+#     - Выполняет git commit и push изменений
+# - Поддерживает два режима: auto (по умолчанию) и manual-review
+
+name: Clean Docs for GPT
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode: auto or manual-review'
+        required: false
+        default: 'auto'
+
+jobs:
+  clean-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Run cleaner script with selected mode
+        run: python3 scripts/clean_markdown.py "${{ github.event.inputs.mode }}"

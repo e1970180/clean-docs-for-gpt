@@ -1,0 +1,23 @@
+# .clean-docs-for-gpt_config.yml
+#
+# Основной конфигурационный файл проекта clean-docs-for-gpt.
+#
+# Поля:
+# - repo_url: URL внешнего публичного GitHub-репозитория с документацией
+# - include: список путей/шаблонов, которые нужно обрабатывать
+# - exclude: список исключений (игнорируются даже если включены в include)
+# - extensions: расширения файлов, которые следует обрабатывать
+
+repo_url: https://github.com/home-assistant/home-assistant.io
+
+include:
+  - source/docs/*  # Включить все файлы документации
+exclude:
+  - source/blog/*  # Исключить блог
+  - source/_*      # Исключить скрытые или вспомогательные директории
+
+extensions:
+  - .md
+  - .markdown
+  - .yaml
+  - .yml
