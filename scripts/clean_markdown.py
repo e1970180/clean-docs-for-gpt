@@ -1,23 +1,43 @@
-
 # clean_markdown.py — Clean and extract documentation for ChatGPT
 #
-# This script clones a documentation repository, selects and cleans relevant files
-# (Markdown/YAML), saves the cleaned versions preserving structure, and logs the changes.
-# It supports 'auto' and 'manual-review' execution modes.
+# This standalone script clones a documentation repo, selects and cleans Markdown/YAML files,
+# saves the cleaned versions preserving structure, and logs the changes.
+# It supports 'auto' and 'manual-review' execution modes and requires no external modules.
 
 import os
+import sys
 import shutil
-import yaml
+import fnmatch
 import subprocess
+import yaml
 from pathlib import Path
 from datetime import datetime
 
-from scripts.utils import clean_text, match_patterns
-
-# Configuration paths
 CONFIG_PATH = Path(".clean-docs-for-gpt_config.yml")
 STATE_FILE = Path(".clean-docs-for-gpt/last_commit.txt")
 LOG_FILE = Path(".clean-docs-for-gpt/cleaning_log.txt")
+
+
+def clean_text(text):
+    """Perform basic cleanup: strip empty lines and excessive whitespace."""
+    return '\n'.join(line.rstrip() for line in text.splitlines() if line.strip())
+
+
+def match_patterns(path, patterns):
+    """Match file path against any pattern using glob syntax."""
+    if not patterns:
+        return False
+    return any(fnmatch.fnmatch(path.as_posix(), pattern) for pattern in patterns)
+
+
+def clone_repo(repo_url):
+    """Clone repo to tmp_repo folder and return its path and commit hash."""
+    tmp_path = Path("tmp_repo")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+    subprocess.run(["git", "clone", "--depth=1", repo_url, str(tmp_path)], check=True)
+    commit = subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
+    return tmp_path, commit
 
 
 def load_config():
@@ -25,20 +45,8 @@ def load_config():
         return yaml.safe_load(f)
 
 
-def clone_repo(repo_url):
-    """Clone the source repo to a temporary directory and return path + commit hash."""
-    tmp_path = Path("tmp_repo")
-    if tmp_path.exists():
-        shutil.rmtree(tmp_path)
-    subprocess.run(["git", "clone", "--depth=1", repo_url, str(tmp_path)], check=True)
-    commit = subprocess.check_output(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
-    ).strip()
-    return tmp_path, commit
-
-
 def already_processed(commit_hash):
-    """Check if this commit was already processed (to skip reprocessing)."""
+    """Check if this commit was already cleaned."""
     if STATE_FILE.exists():
         return STATE_FILE.read_text(encoding="utf-8").strip() == commit_hash
     return False
@@ -50,7 +58,7 @@ def save_commit_hash(commit_hash):
 
 
 def write_log(report, summary, commit_hash, repo_url):
-    """Generate a human-readable cleaning report."""
+    """Generate human-readable report of cleaned files."""
     LOG_FILE.parent.mkdir(exist_ok=True)
     with LOG_FILE.open("w", encoding="utf-8") as log:
         log.write(f"# clean-docs-for-gpt – Cleaning Report\n")
@@ -67,7 +75,6 @@ def write_log(report, summary, commit_hash, repo_url):
             log.write(f"   Cleaned chars    : {item['cleaned_chars']}\n")
             log.write(f"   Removed chars    : {item['removed_chars']}\n")
             log.write(f"   Notes            : {item['notes']}\n\n")
-
         log.write(f"--- Summary ---\n")
         log.write(f"Total files         : {summary['files']}\n")
         log.write(f"Total lines before  : {summary['lines_before']}\n")
@@ -79,8 +86,8 @@ def write_log(report, summary, commit_hash, repo_url):
 
 
 def clean_docs(repo_url, commit_hash, repo_path, config):
-    output_dir = f"{Path(repo_url).name}-clean-docs-for-gpt"
-    Path(output_dir).mkdir(exist_ok=True)
+    out_dir = f"{Path(repo_url).name}-clean-docs-for-gpt"
+    Path(out_dir).mkdir(exist_ok=True)
 
     report = []
     summary = {
@@ -132,15 +139,14 @@ def clean_docs(repo_url, commit_hash, repo_path, config):
         summary["chars_after"] += cleaned_chars
         summary["chars_removed"] += original_chars - cleaned_chars
 
-        output_file = Path(output_dir) / rel_path
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(cleaned, encoding="utf-8")
+        out_path = Path(out_dir) / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(cleaned, encoding="utf-8")
 
     write_log(report, summary, commit_hash, repo_url)
 
 
 def main():
-    import sys
     mode = sys.argv[1] if len(sys.argv) > 1 else "auto"
     config = load_config()
     repo_url = config["repo_url"]
@@ -158,10 +164,7 @@ def main():
     clean_docs(repo_url, commit_hash, repo_path, config)
     save_commit_hash(commit_hash)
 
-    if mode == "auto":
-        print("[INFO] Cleaning complete. Files updated.")
-    else:
-        print("[INFO] Manual mode complete.")
+    print("[INFO] Cleaning complete.")
 
 
 if __name__ == "__main__":
