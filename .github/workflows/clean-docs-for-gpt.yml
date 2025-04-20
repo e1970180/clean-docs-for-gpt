@@ -18,7 +18,9 @@ on:
         description: 'Execution mode: auto or manual-review'
         required: false
         default: 'auto'
-
+permissions:
+  contents: write
+  
 jobs:
   clean-docs:
     runs-on: ubuntu-latest
