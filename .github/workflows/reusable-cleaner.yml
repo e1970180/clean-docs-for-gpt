@@ -1,0 +1,43 @@
+name: reusable-clean-docs
+
+on:
+  workflow_call:
+    inputs:
+      config_path:
+        required: true
+        type: string
+
+jobs:
+  clean-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout clean-docs-for-gpt
+        uses: actions/checkout@v4
+
+      - name: Checkout calling repo (docs)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: docs
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Run cleaner
+        run: |
+          python scripts/clean_markdown.py docs/${{ inputs.config_path }}
+
+      - name: Commit results
+        run: |
+          cd docs
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "docs: update cleaned documentation" || echo "nothing to commit"
+          git push || echo "nothing to push"
