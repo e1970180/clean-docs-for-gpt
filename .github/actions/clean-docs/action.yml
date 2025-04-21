@@ -17,5 +17,5 @@ runs:
       shell: bash
 
     - name: Run cleaner
-      run: python scripts/clean_markdown.py ${{ inputs.config_path }}
+      run:  python ${{ github.action_path }}/scripts/clean_markdown.py ${{ inputs.config_path }}
       shell: bash
