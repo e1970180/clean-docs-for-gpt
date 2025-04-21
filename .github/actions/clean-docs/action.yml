@@ -1,0 +1,19 @@
+name: Clean Docs
+description: Cleans documentation files using clean_markdown.py
+inputs:
+  config_path:
+    description: 'Path to the configuration file'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies
+      run: pip install pyyaml
+
+    - name: Run cleaner
+      run: python scripts/clean_markdown.py ${{ inputs.config_path }}
